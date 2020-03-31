@@ -2,7 +2,11 @@
 title: "TranscriptsFromSalmonQuants"
 author: "Sam Thudium"
 date: "3/30/2020"
-output: html_document
+output: 
+  html_document:
+    code_folding: hide
+    
+  
 ---
 
 ```{r setup, include=FALSE}
@@ -14,7 +18,7 @@ This will be a modification to the Korb Lab's Deseq2 pipeline such that instead 
 The majority of the pipeline is the same, so I'll just highlight a couple adjustments.
 Everything until the call of tximport can remain the same.
 
-``` {r, echo = FALSE}
+``` {r}
 
 #Start here if code has been run on this computer before (and packages are installed, databases made, etc.)
 library("DESeq2")
@@ -57,7 +61,7 @@ head(files,6)
 
 Now, instead of the usual call to tximport(), in which we'd map the transcript IDs present in the quant.sf files to gene IDs, use the following call. 
 
-``` {r}
+``` {r, echo = TRUE}
 
 txi.tx <- tximport(files, type="salmon", txOut = TRUE, countsFromAbundance = "lengthScaledTPM", ignoreAfterBar = TRUE)
 
@@ -65,7 +69,7 @@ txi.tx <- tximport(files, type="salmon", txOut = TRUE, countsFromAbundance = "le
 
 This specifies that we want transcript-level import from salmon. Of note, there are a couple of options for countsFromAbundance, which specifices how R should calculate TPM. Also, there seems to be some sort of bug in importing the rownames; currently tximport brings in all the names in each row of the quant file (i.e. "ENSMUST00000193812.1|ENSMUSG00000102693.1|OTTMUSG00000049935.1|OTTMUST00000127109.1|"). I'm not quite sure why that's happening but it seems that the majority of the pipeline still runs just fine. 
 
-``` {r, echo = FALSE}
+``` {r}
 
 dim(txi.tx$abundance)
 dim(txi.tx$counts)
