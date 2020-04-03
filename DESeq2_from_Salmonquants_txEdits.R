@@ -68,9 +68,11 @@ head(txi$counts)
 
 ## NOTE: if running just the Deseq pipeline, skip to making the DeseqDataSet on line 76 
 
-cts <- as_tibble(txi$counts, rownames = NA) # covert the counts matrix from tximport into a data frame for easier usage.
+
+# covert the counts matrix from tximport into a data frame for easier usage.
+cts <- as_tibble(txi$counts, rownames = NA)
 cts <- rownames_to_column(cts)
-head(cts)
+
 # Rename the column names to something more manageable and make sure to store the key 
 # somewhere in case you want to know which data set a specific number came from
 
@@ -97,10 +99,23 @@ detach(package:plyr)
 # per gene per condition, so we group on those variables and add a column, mean. Make sure to ungroup at the
 # end or later use of functions may act weird. 
 
-cts_tidy <- cts_tidy %>%
+cts_tidy.2 <- cts_tidy %>%
  group_by(condition, GeneID) %>%
   mutate(mean = mean(count)) %>%
   ungroup()
+
+# I think the next thing to do is to move the mean count data into a wider
+# format so that the df has two columns WT and KO, underneath which you see
+# the count (averaged across the three corresponding samples) per gene.
+
+cts_tidy.2 <- cts_tidy.2 %>%
+  pivot_wider(names_from = condition, values_from = mean)
+
+# I'm not sure this is the best way to proceed, but I am now splitting the df
+# into two separate dfs, one for WT and one for KO
+
+cts_split <- cts_tidy.2 %>% group_by(condition) %>% group_split()
+
 
 
 #Now, we will build a DESeqDataSet from the matrices in tx
@@ -119,7 +134,8 @@ table(duplicated(substr(rownames(dds),1,18)))
 rownames(dds) <- make.unique(substr(rownames(dds),1,18)) ## <--- HERE YOU LOSE THE TRANSCRIPT IDs
 #head(dds)
 
-#Now we can run our differential expression pipeline. First, it is sometimes convenient to remove genes where all the samples have very small counts. It's less of an issue for the statistical methods, and mostly just wasted computation, as it is not possible for these genes to exhibit statistical significance for differential expression. Here we count how many genes (out of those with at least a single count) have 3 samples with a count of 10 or more:
+#Now we can run our differential expression pipeline. First, it is sometimes convenient to remove genes where all the samples have very small counts. It's less of an issue for the statistical methods, and mostly just wasted computation, as it is not possible for these genes to exhibit statistical significance for differential expression. 
+# Here we count how many genes (out of those with at least a single count) have 3 samples with a count of 10 or more:
 dds <- dds[rowSums(counts(dds)) > 0,]
 keep_dds <- rowSums(counts(dds) >= 1) >= 3
 table(keep_dds)
