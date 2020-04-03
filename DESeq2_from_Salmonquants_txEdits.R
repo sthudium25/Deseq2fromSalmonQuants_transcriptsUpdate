@@ -112,11 +112,16 @@ cts_tidy.2 <- cts_tidy.2 %>%
   pivot_wider(names_from = condition, values_from = mean)
 
 # I'm not sure this is the best way to proceed, but I am now splitting the df
-# into two separate dfs, one for WT and one for KO
+# into two separate dfs, one for WT and one for KO. I'm also selecting only the 
+# necessary rows so that when the tables are ultimately joined, it won't be a mess
 
-cts_split <- cts_tidy.2 %>% group_by(condition) %>% group_split()
+cts_split <- split(x = cts_tidy.2, f = cts_tidy.2$condition)
 
+# We need to cut off the decimals as we do in the Deseq pipeline. I just used the same procedure
+# There's definitely a way to do this in one line but that's a later issue
 
+cts_split$WT$GeneID <- make.unique(substr(cts_split$WT$GeneID, 1, 18))
+cts_split$KO$GeneID <- make.unique(substr(cts_split$KO$GeneID, 1, 18))
 
 #Now, we will build a DESeqDataSet from the matrices in tx
 
@@ -131,8 +136,10 @@ plotPCA(vst, "Treatment")
 #However, we have a few genes which would have duplicated gene IDs after chopping off the version number, so in order to proceed we have to also use make.unique to indicate that some genes are duplicated. (It might be worth looking into why we have multiple versions of genes with the same base ID coming from our annotation.)
 head(dds)
 table(duplicated(substr(rownames(dds),1,18)))
-rownames(dds) <- make.unique(substr(rownames(dds),1,18)) ## <--- HERE YOU LOSE THE TRANSCRIPT IDs
-#head(dds)
+rownames(dds) <- make.unique(substr(rownames(dds),1,18)) 
+head(dds)
+?map2
+
 
 #Now we can run our differential expression pipeline. First, it is sometimes convenient to remove genes where all the samples have very small counts. It's less of an issue for the statistical methods, and mostly just wasted computation, as it is not possible for these genes to exhibit statistical significance for differential expression. 
 # Here we count how many genes (out of those with at least a single count) have 3 samples with a count of 10 or more:
