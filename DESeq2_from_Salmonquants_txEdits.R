@@ -188,14 +188,24 @@ head(res_dds_over1)
 #row.names(res_dds_over1) <- namesTrim
 #head(res_dds_over1)
 
-write.csv((res_dds_over1),
+## Now, rather than writing out the res_dds_over1 file as usual, we will pull in the grouped
+## mean count data from out cts_split list. 
+
+library(biobroom)
+res_over1_tidy <- tidy.DESeqResults(res_dds_over1)
+head(res_over1_tidy)
+
+# I'm now going to try to join the mean count data to this above df.
+
+res_cts_tidy <- res_over1_tidy %>% 
+  left_join(cts_split$WT, by = c("gene" = "GeneID")) %>% 
+  left_join(cts_split$KO, by = c("gene" = "GeneID"), suffix = c("_WT", "_KO")) %>% 
+  select(-baseMean, log2FC = estimate, -sample_WT, -sample_KO, -condition_KO, -condition_WT)
+
+head(res_cts_tidy)
+
+write.csv((res_cts_tidy),
           file="/Volumes/LaCie/SequencingData/H2BE/old_brains/DESeq/Sam_analysis/1.H2beOldBrains_WTvKO_Deseq_transcript.2_UseingTxOut.csv")
 
-
-
-
-
-write.csv((dds_over1_tidy),
-          file="/Volumes/LaCie/SequencingData/H2BE/old_brains/DESeq/Sam_analysis/1.tidyCountsDF_txFromSalmon.csv")
 
 
