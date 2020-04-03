@@ -58,47 +58,65 @@ dim(txi$abundance)
 dim(txi$counts)
 dim(txi$length)
 head(txi$counts)
+# At this point, we have a list object called txi that contains abundance, counts, and length information from 
+# the aggregated Salmon quant.sf files. As the code is currectly written, the counts are TPMs that have been
+# scaled to both the length of the gene (avg length of the detected transcripts for a given gene) and the size 
+# of the library. Thus, we now ought to be able to compare counts of a gene across the 6 libraries that are 
+# present in these dataset. My understanding is that we would like to look at counts BY CONDITION so I 
+# attempting to separate the 6 columns (libraries) by mouse background (WT or KO). Then, we can get a group 
+# average count for each gene. 
 
 ## NOTE: if running just the Deseq pipeline, skip to making the DeseqDataSet on line 76 
 
-cts <- tidy(txi$counts) # covert the counts matrix from tximport into a data frame for easier usage.
+cts <- as_tibble(txi$counts, rownames = NA) # covert the counts matrix from tximport into a data frame for easier usage.
+cts <- rownames_to_column(cts)
 head(cts)
-
 # Rename the column names to something more manageable and make sure to store the key 
 # somewhere in case you want to know which data set a specific number came from
+
 colnames(cts) <- c("GeneID", "KO.1", "KO.2", "KO.3", "WT.1", "WT.2", "WT.3")
 head(cts)
-# Gather the columns into a tidy format for easier manipulation
-cts_tidy <- gather(cts, key = "sample", value = "scaledTPM", -GeneID)
+
+# Gather the columns into a tidy format for easier manipulation. 
+cts_tidy <- gather(cts, key = "sample", value = "count", -GeneID)
 head(cts_tidy)
 
-cts_tidy.2 <- cts_tidy %>%
+# Add a factor column that denotes which group, WT or KO, the measured count is from.
+cts_tidy <- cts_tidy %>%
    mutate(condition = as.factor(grepl("KO.*", sample))) 
 
-cts_tidy.2$condition <- revalue(cts_tidy.2$condition, c("FALSE" = "WT", "TRUE" = "KO"))
-head(cts_tidy.2)
+# There's probably a better way around this but in order to label the conditions with WT and KO, 
+# I've loaded the plyr package whcih has this handy revalue function. However, we then need to immediately
+# remove plyr from the library because it interferes with dplyr (which I found out the hard way)
+library(plyr)
+cts_tidy$condition <- revalue(cts_tidy$condition, c("FALSE" = "WT", "TRUE" = "KO"))
+head(cts_tidy)
+detach(package:plyr)
 
-cts_tidy.2 %>%
- group_by(GeneID, condition) %>%
- summarise(mean = mean(scaledTPM)) 
+# Now, we can perform calculations on different groupings of data In this case, we want the mean counts 
+# per gene per condition, so we group on those variables and add a column, mean. Make sure to ungroup at the
+# end or later use of functions may act weird. 
 
+cts_tidy <- cts_tidy %>%
+ group_by(condition, GeneID) %>%
+  mutate(mean = mean(count)) %>%
+  ungroup()
 
 
 #Now, we will build a DESeqDataSet from the matrices in tx
-# rownames(txi.tx) <- res[, 1]
-dds <- DESeqDataSetFromTximport(txi.tx, colData, ~ Treatment)
-#rownames(txi.tx) <- res[, 1]
-#str(dds)
+
+dds <- DESeqDataSetFromTximport(txi, colData, ~ Treatment)
+str(dds)
 #My favorite of these transformation is the vst, mostly because it is very fast, and provides transformed (nearly log-scale) data which is robust to many problems associated with log-transformed data (for more details, see the DESeq2 workflow or vignette ).
 #blind=FALSE refers to the fact that we will use the design in estimating the global scale of biological variability, but not directly in the transformation:
 vst <- vst(dds, blind=FALSE)
-#plotPCA(vst, "Treatment")
+plotPCA(vst, "Treatment")
 
 #We will chop off the version number of the gene IDs, so that we can better look up their annotation information later.
 #However, we have a few genes which would have duplicated gene IDs after chopping off the version number, so in order to proceed we have to also use make.unique to indicate that some genes are duplicated. (It might be worth looking into why we have multiple versions of genes with the same base ID coming from our annotation.)
 head(dds)
 table(duplicated(substr(rownames(dds),1,18)))
-#rownames(dds) <- make.unique(substr(rownames(dds),1,18)) ## <--- HERE YOU LOSE THE TRANSCRIPT IDs
+rownames(dds) <- make.unique(substr(rownames(dds),1,18)) ## <--- HERE YOU LOSE THE TRANSCRIPT IDs
 #head(dds)
 
 #Now we can run our differential expression pipeline. First, it is sometimes convenient to remove genes where all the samples have very small counts. It's less of an issue for the statistical methods, and mostly just wasted computation, as it is not possible for these genes to exhibit statistical significance for differential expression. Here we count how many genes (out of those with at least a single count) have 3 samples with a count of 10 or more:
@@ -123,12 +141,12 @@ summary(res_dds_over1)
 
 #add gene names (symbols) to deseq results file
 #modify your deseq results (res) table to take off numbers after decimal point to allow for matching to this database, needed to install org.Mm.eg.db previously for this to work
-#geneIDs <- substr(rownames(res_dds_over1), 1, 18)
+geneIDs <- substr(rownames(res_dds_over1), 1, 18)
 # running mapIDs: collect gene symbols for the ensembl names in your geneID list
-#library(org.Mm.eg.db)
-#gene_symbols <- mapIds(org.Mm.eg.db, keys = geneIDs, column = "SYMBOL", keytype = "ENSEMBL", multiVals = "first")
+library(org.Mm.eg.db)
+gene_symbols <- mapIds(org.Mm.eg.db, keys = geneIDs, column = "SYMBOL", keytype = "ENSEMBL", multiVals = "first")
 #add gene symbols as a new column to your res file
-#res_dds_over1$GeneSymbol <- gene_symbols
+res_dds_over1$GeneSymbol <- gene_symbols
 
 par("mar")
 par(mar=c(1,1,1,1))
@@ -139,13 +157,13 @@ with(subset(res_dds_over1, padj<.05 ), points(log2FoldChange, -log10(pvalue), pc
 #with(subset(res, abs(log2FoldChange)>1), points(log2FoldChange, -log10(pvalue), pch=20, col="orange"))
 #with(subset(res, padj<.05 & abs(log2FoldChange)>1), points(log2FoldChange, -log10(pvalue), pch=20, col="green"))
 res_dds_over1 <- as.data.frame(res_dds_over1)
-#res_dds_over1 <- res_dds_over1[ ,c(7, 1:6)]
-
-row.names(res_dds_over1)
-a <- row.names(res_dds_over1)
-namesTrim <- gsub("\\|.*", "", a)
-row.names(res_dds_over1) <- namesTrim
+res_dds_over1 <- res_dds_over1[ ,c(7, 1:6)]
 head(res_dds_over1)
+#row.names(res_dds_over1)
+#a <- row.names(res_dds_over1)
+#namesTrim <- gsub("\\|.*", "", a)
+#row.names(res_dds_over1) <- namesTrim
+#head(res_dds_over1)
 
 write.csv((res_dds_over1),
           file="/Volumes/LaCie/SequencingData/H2BE/old_brains/DESeq/Sam_analysis/1.H2beOldBrains_WTvKO_Deseq_transcript.2_UseingTxOut.csv")
