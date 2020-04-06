@@ -70,6 +70,7 @@ head(txi$counts)
 
 
 # covert the counts matrix from tximport into a data frame for easier usage.
+library(tidyverse)
 cts <- as_tibble(txi$counts, rownames = NA)
 cts <- rownames_to_column(cts)
 
@@ -87,13 +88,7 @@ head(cts_tidy)
 cts_tidy <- cts_tidy %>%
    mutate(condition = as.factor(grepl("KO.*", sample))) 
 
-# There's probably a better way around this but in order to label the conditions with WT and KO, 
-# I've loaded the plyr package whcih has this handy revalue function. However, we then need to immediately
-# remove plyr from the library because it interferes with dplyr (which I found out the hard way)
-library(plyr)
-cts_tidy$condition <- revalue(cts_tidy$condition, c("FALSE" = "WT", "TRUE" = "KO"))
-head(cts_tidy)
-detach(package:plyr)
+levels(cts_tidy$condition) <- c("WT", "KO")
 
 # Now, we can perform calculations on different groupings of data In this case, we want the mean counts 
 # per gene per condition, so we group on those variables and add a column, mean. Make sure to ungroup at the
@@ -109,8 +104,14 @@ cts_tidy.2 <- cts_tidy %>%
 # the count (averaged across the three corresponding samples) per gene.
 
 cts_tidy.2 <- cts_tidy.2 %>%
-  pivot_wider(names_from = condition, values_from = mean)
+  pivot_wider(names_from = condition, values_from = mean) %>%
+  mutate(condition = as.factor(grepl("KO.*", sample)))
 
+levels(cts_tidy.2$condition) <- c("WT", "KO")
+  
+head(cts_tidy.2)
+tail(cts_tidy.2)
+cts_tidy.2 <- select(cts_tidy.2, -sample, -count)
 # I'm not sure this is the best way to proceed, but I am now splitting the df
 # into two separate dfs, one for WT and one for KO. I'm also selecting only the 
 # necessary rows so that when the tables are ultimately joined, it won't be a mess
@@ -122,7 +123,7 @@ cts_split <- split(x = cts_tidy.2, f = cts_tidy.2$condition)
 
 cts_split$WT$GeneID <- make.unique(substr(cts_split$WT$GeneID, 1, 18))
 cts_split$KO$GeneID <- make.unique(substr(cts_split$KO$GeneID, 1, 18))
-
+head(cts_split)
 #Now, we will build a DESeqDataSet from the matrices in tx
 
 dds <- DESeqDataSetFromTximport(txi, colData, ~ Treatment)
@@ -138,8 +139,6 @@ head(dds)
 table(duplicated(substr(rownames(dds),1,18)))
 rownames(dds) <- make.unique(substr(rownames(dds),1,18)) 
 head(dds)
-?map2
-
 
 #Now we can run our differential expression pipeline. First, it is sometimes convenient to remove genes where all the samples have very small counts. It's less of an issue for the statistical methods, and mostly just wasted computation, as it is not possible for these genes to exhibit statistical significance for differential expression. 
 # Here we count how many genes (out of those with at least a single count) have 3 samples with a count of 10 or more:
@@ -200,9 +199,17 @@ head(res_over1_tidy)
 res_cts_tidy <- res_over1_tidy %>% 
   left_join(cts_split$WT, by = c("gene" = "GeneID")) %>% 
   left_join(cts_split$KO, by = c("gene" = "GeneID"), suffix = c("_WT", "_KO")) %>% 
-  select(-baseMean, log2FC = estimate, -sample_WT, -sample_KO, -condition_KO, -condition_WT)
+  select(-baseMean, log2FC = estimate, -condition_KO, -condition_WT, -KO_WT, -WT_KO,
+         WT_cts = WT_WT, KO_cts = KO_KO)
 
 head(res_cts_tidy)
+
+geneIDs <- substr(res_cts_tidy$gene, 1, 18)
+library(org.Mm.eg.db)
+gene_symbols <- mapIds(org.Mm.eg.db, keys = geneIDs, column = "SYMBOL", keytype = "ENSEMBL", multiVals = "first")
+#add gene symbols as a new column to your res file
+res_cts_tidy$GeneSymbol <- gene_symbols
+res_cts_tidy <- res_cts_tidy[ ,c(1,9,2:8)]
 
 write.csv((res_cts_tidy),
           file="/Volumes/LaCie/SequencingData/H2BE/old_brains/DESeq/Sam_analysis/1.H2beOldBrains_WTvKO_Deseq_transcript.2_UseingTxOut.csv")
