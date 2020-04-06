@@ -194,13 +194,20 @@ library(biobroom)
 res_over1_tidy <- tidy.DESeqResults(res_dds_over1)
 head(res_over1_tidy)
 
-# I'm now going to try to join the mean count data to this above df.
+# I'm now going to try to join the mean count data to this above df. I am also removing/adding so
+# that we're left with the columns that are most useful.
 
 res_cts_tidy <- res_over1_tidy %>% 
   left_join(cts_split$WT, by = c("gene" = "GeneID")) %>% 
   left_join(cts_split$KO, by = c("gene" = "GeneID"), suffix = c("_WT", "_KO")) %>% 
   select(-baseMean, log2FC = estimate, -condition_KO, -condition_WT, -KO_WT, -WT_KO,
-         WT_cts = WT_WT, KO_cts = KO_KO)
+         WT_cts = WT_WT, KO_cts = KO_KO) %>%
+  pivot_longer(cols = WT_cts:KO_cts, 
+               names_to = "condition", 
+               names_ptypes = list(
+                 condition = factor()),
+               values_to = "count")
+
 
 head(res_cts_tidy)
 
@@ -211,8 +218,7 @@ gene_symbols <- mapIds(org.Mm.eg.db, keys = geneIDs, column = "SYMBOL", keytype 
 res_cts_tidy$GeneSymbol <- gene_symbols
 res_cts_tidy <- res_cts_tidy[ ,c(1,9,2:8)]
 
+
 write.csv((res_cts_tidy),
           file="/Volumes/LaCie/SequencingData/H2BE/old_brains/DESeq/Sam_analysis/1.H2beOldBrains_WTvKO_Deseq_transcript.2_UseingTxOut.csv")
-
-
 
