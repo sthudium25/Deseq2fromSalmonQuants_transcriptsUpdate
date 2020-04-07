@@ -179,7 +179,7 @@ with(subset(res_dds_over1, padj<.05 ), points(log2FoldChange, -log10(pvalue), pc
 #with(subset(res, abs(log2FoldChange)>1), points(log2FoldChange, -log10(pvalue), pch=20, col="orange"))
 #with(subset(res, padj<.05 & abs(log2FoldChange)>1), points(log2FoldChange, -log10(pvalue), pch=20, col="green"))
 res_dds_over1 <- as.data.frame(res_dds_over1)
-res_dds_over1 <- res_dds_over1[ ,c(7, 1:6)]
+#res_dds_over1 <- res_dds_over1[ ,c(7, 1:6)]
 head(res_dds_over1)
 #row.names(res_dds_over1)
 #a <- row.names(res_dds_over1)
@@ -208,9 +208,9 @@ res_cts_tidy <- res_over1_tidy %>%
                  condition = factor()),
                values_to = "count")
 
-
-head(res_cts_tidy)
-
+# I had some trouble getting the gene names into the table earlier for some reason, so I'm putting
+# them in here. It's likely that they can be added to res_dds_over1 as they are in the original
+# pipeline
 geneIDs <- substr(res_cts_tidy$gene, 1, 18)
 library(org.Mm.eg.db)
 gene_symbols <- mapIds(org.Mm.eg.db, keys = geneIDs, column = "SYMBOL", keytype = "ENSEMBL", multiVals = "first")
@@ -218,7 +218,117 @@ gene_symbols <- mapIds(org.Mm.eg.db, keys = geneIDs, column = "SYMBOL", keytype 
 res_cts_tidy$GeneSymbol <- gene_symbols
 res_cts_tidy <- res_cts_tidy[ ,c(1,9,2:8)]
 
+## Here I am adding a label of quartiles based on where the log2FC falls in the distribution
+res_cts_tidy <- res_cts_tidy %>% mutate(quartile = ntile(log2FC, 4))
+head(res_cts_tidy)
+
+# Now, the dataset is ready for EDA. Since it's in a tidy format, ggplot2 will work well for many
+# different types of visualizations for this data. 
 
 write.csv((res_cts_tidy),
-          file="/Volumes/LaCie/SequencingData/H2BE/old_brains/DESeq/Sam_analysis/1.H2beOldBrains_WTvKO_Deseq_transcript.2_UseingTxOut.csv")
+          file="/Volumes/LaCie/SequencingData/H2BE/old_brains/DESeq/Sam_analysis/1.H2beKOvsWT_deseqWithGeneExpr.csv")
+
+## Get distributions of expression levels by condition
+res_cts_tidy %>%
+  ggplot(aes(condition, count)) +
+  geom_boxplot() +
+  scale_y_continuous(trans = "log10")
+
+## Get the distribution of KO Log2FC vs WT
+
+res_cts_tidy %>%
+  ggplot() +
+  geom_density(aes(x = log2FC), bw = 2.2)
+
+## Get distribution of log2FCs, binned by quartiles 
+
+res_cts_tidy %>%
+  filter(condition == "WT_cts",
+         count > 1) %>%
+  ggplot(aes(x = log2FC, y = count, group = quartile)) +
+    geom_boxplot() +
+  facet_wrap(. ~ as.factor(quartile)) +
+  scale_y_log10()
+  
+res_cts_tidy %>%
+  filter(condition == "WT_cts",
+         count > 1) %>%
+  ggplot(aes(x = log2FC, y = count, group = quartile)) +
+  geom_boxplot(varwidth = TRUE) +
+  scale_y_log10()
+  
+## THis one gives a nice visual for all datapoints
+res_cts_tidy %>%
+  group_by(quartile) %>%
+  filter(condition == "WT_cts",
+         count > 1) %>%
+  ggplot(aes(x = as.factor(quartile), y = count)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  ggtitle("WT counts vs KO Log2FC") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(caption = "Binned as quartiles of KO Log2FC vs WT") 
+
+# Showing just data points with p.adjusted < 0.05
+res_cts_tidy %>%
+  filter(condition == "WT_cts",
+         count > 5,
+         p.adjusted < 0.05) %>%
+  ggplot(aes(x = as.factor(quartile), y = count)) +
+  geom_boxplot() +
+  scale_y_log10() +
+  ggtitle("WT counts vs Significant KO Log2FC") +
+  theme(plot.title = element_text(hjust = 0.5))
+
+## This code makes a plot that has the WT count distribution for significant UP and DOWN DE genes
+## as well as the distribution of ALL WT COUNTS as a comparison. 
+## First we make a temporary data frame to hold all WT counts with a minimum expression over 5
+temp <- res_cts_tidy %>%
+  filter(condition == "WT_cts",
+         count > 5) 
+
+## Then, we can begin a new filter on the original data to remove H2be, get counts over 5 and
+## significant adjusted p values
+## I'm plotting that data first and then in the second geom_boxplot I'm adding the full WT count
+## distribution on top
+
+res_cts_tidy %>%
+  filter(GeneSymbol != "Hist2h2be",
+         condition == "WT_cts",
+         count > 5,
+         p.adjusted < 0.05) %>%
+  ggplot(aes(x = as.factor(quartile), y = count)) +
+  geom_boxplot() +
+  geom_boxplot(data = temp, aes(x = condition, y = count)) +
+  scale_y_log10() +
+  ggtitle("WT counts vs Significant KO Log2FC")+
+  labs(caption = "WT Counts > 5; Signif Down (1), Up (4) < 0.05 p.adjust") +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_blank())
+
+
+# Here I'm going to try to do the same thing but with unnamed genes removed 
+# (i.e. GeneSymbol = NA)
+temp2 <- res_cts_tidy %>%
+          filter(condition == "WT_cts",
+          count > 5,
+          !is.na(GeneSymbol)) 
+
+res_cts_tidy %>%
+  filter(GeneSymbol != "Hist2h2be",
+         !is.na(GeneSymbol),
+         condition == "WT_cts",
+         count > 5,
+         p.adjusted < 0.05) %>%
+  ggplot(aes(x = as.factor(quartile), y = count)) +
+  geom_boxplot() +
+  geom_boxplot(data = temp2, aes(x = condition, y = count)) +
+  scale_y_log10() +
+  ggtitle("WT counts vs Significant KO Log2FC_noNAs")+
+  labs(caption = "WT Counts > 5; Signif Down (1), Up (4) < 0.05 p.adjust") +
+  theme(plot.title = element_text(hjust = 0.5),
+        axis.title.x = element_blank())
+
+
+
 
