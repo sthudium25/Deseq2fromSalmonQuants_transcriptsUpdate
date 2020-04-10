@@ -1,0 +1,133 @@
+---
+title: "PracticeRNAseq_airwayDataset"
+author: "Sam Thudium"
+date: "4/10/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+``` {r, echo = F}
+library(airway)
+data("airway")
+se <- airway
+se$dex <- relevel(se$dex, "untrt")
+```
+
+We can quickly check the millions of fragments that uniquely aligned to the genes (the second argument of round tells
+how many decimal points to keep).
+
+``` {r}
+round( colSums(assay(se)) / 1e6, 1 )
+```
+
+Now we're ready to run Deseq on this data
+
+``` {r}
+library(DESeq2)
+dds <- DESeqDataSet(se, design = ~ cell + dex)
+countdata <- assay(se)
+head(countdata, 3)
+coldata <- colData(se)
+```
+
+
+To now construct the DESeqDataSet object from the matrix of counts and the sample information table, we use:
+
+``` {r}
+(dds <- DESeqDataSetFromMatrix(countData = countdata,
+ colData = coldata,
+ design = ~ cell + dex))
+```
+
+Now we begin some exploratory anlaysis and visualization of the data
+Dimensions:
+``` {r}
+dim(dds)
+dds <- dds[ rowSums(counts(dds)) > 1, ]
+nrow(dds)
+```
+
+An regularized logarithm transformation or Variance stabilizing transformation lets you make comparisons between genes that have very different expression values. From Love et al. 2015: 
+"Using an empirical Bayesian prior on inter-sample differences in the form of a ridge penalty, the rlog-transformed data then become approximately homoskedastic, and can be used directly for computing distances between samples and making PCA plots"
+
+Here, "We specify blind=FALSE, which means that differences between cell lines and treatment should not add to the variance-mean profile of the experiment"
+
+``` {r}
+rld <- rlog(dds, blind=FALSE)
+head(assay(rld), 3)
+
+(vst <- vst(dds, blind = FALSE))
+head(assay(vst), 5)
+```
+
+Explore the relationship between samples by graphing
+``` {r}
+par( mfrow = c( 1, 2 ) )
+plot(assay(rld)[,1:2],
+ pch=16, cex=0.3)
+
+plot(assay(vst)[, 1:4],
+     pch = 16, cex = 0.3)
+```
+
+Or use PCA to view all samples at once. There's a built-in PCA function in Deseq2 but you could also build a PCA plot in ggplot2 if you wanted. This could be helpful for looking at how the samples in your dataset relate to one another. 
+``` {r}
+(PCAdata <- plotPCA(vst, "Sample", returnData = TRUE))
+(rlog_pca <- plotPCA(rld, intgroup = c("dex", "cell"), returnData = TRUE))
+library(ggplot2)
+## Add a new column to the matrix 
+percentVar <- round(100 * attr(rlog_pca, "percentVar"))
+rlog_pca %>%
+  ggplot(aes(x = PC1, y = PC2, color = dex, shape = cell)) +
+  geom_point(size = 4) +
+  xlab(paste0("PC1: ",percentVar[1],"% variance")) +
+  ylab(paste0("PC2: ",percentVar[2],"% variance"))
+
+```
+
+This shows pretty clearly that treatment has a strong effect 
+
+Another helpful piece of information is the overall similarity between samples. To visualize that, we can use clustering based on the Euclidean distance between samples.  Here, we want roughly equal contribution to the center of each sample (from which Euclidean distances will be calculated), so we use the rlog transformed or the vst data. 
+
+``` {r}
+(rlogSampleDists <- dist( t( assay(rld) )))
+(vstSampleDists <- dist( t(assay(vst))))
+```
+
+You can then visualize those distances with a heatmap
+``` {r}
+library("pheatmap")
+library("RColorBrewer")
+
+sampleDistMatrix <- as.matrix( vstSampleDists )
+rownames(sampleDistMatrix) <- paste( vst$dex, vst$cell, sep="-" )
+colnames(sampleDistMatrix) <- NULL
+colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
+pheatmap(sampleDistMatrix,
+ clustering_distance_rows=vstSampleDists,
+ clustering_distance_cols=vstSampleDists,
+ col=colors)
+
+## OR
+
+library(PoiClaClu)
+poisd <- PoissonDistance(t(counts(dds)))
+samplePoisDistMatrix <- as.matrix( poisd$dd )
+rownames(samplePoisDistMatrix) <- paste( rld$dex, rld$cell, sep="-" )
+colnames(samplePoisDistMatrix) <- NULL
+pheatmap(samplePoisDistMatrix,
+ clustering_distance_rows=poisd$dd,
+ clustering_distance_cols=poisd$dd,
+ col=colors)
+```
+
+We can also run the Differential Expression Analysis offered by Deseq2. Calling mcols on this resulting object gives you some information about each of the columns produced. 
+``` {r}
+dds <- DESeq(dds)
+(res <- results(dds, ))
+mcols(res, use.names = TRUE)
+```
