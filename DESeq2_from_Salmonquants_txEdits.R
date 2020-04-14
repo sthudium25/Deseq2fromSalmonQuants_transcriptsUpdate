@@ -37,12 +37,12 @@ samplenames
 #samplenames_reorder
 
 # for differential expression between control and one condition alone 
-samplenames_subset <- samplenames[c(2:7)] #from the list of files, I select the ones I want for the LPS alone and LPS-RMM comparison (from the list of file names I selected above), and put them in the correct order
+samplenames_subset <- samplenames[c(5:7, 2:4)] #from the list of files, I select the ones I want for the LPS alone and LPS-RMM comparison (from the list of file names I selected above), and put them in the correct order
 samplenames_subset
 #Write out the treatment conditions: (the levels tells the analysis which conditions to set as a control to compare to)
 #Treatment <- factor(c("Control", "Control", "Control", "Dot1Li_4h","Dot1Li_4h","Dot1Li_4h"), levels=c("Control","Dot1Li_4h"))
 #Alternatively can 'repeat' a name to avoid having to retype:
-Treatment <- factor(c(rep("KO",3),rep("WT",3)), levels=c("KO","WT"))
+Treatment <- factor(c(rep("WT",3),rep("KO",3)), levels=c("WT","KO"))
 Treatment
 colData <- data.frame(samplenames_subset, Treatment)
 colData #this is a table that has the exact file names of the Salmon output, and the other columns are descriptors of the experimental design that will be important for the DESeq2 analysis later on
@@ -53,7 +53,10 @@ names(files) <- colData$samplenames_subset
 head(files,6)
 
 #use Tximport to read in files correctly. dim gives dimension readout. Should be the number of lines and the number of samples
-txi<- tximport(files, type="salmon", tx2gene = tx2gene, countsFromAbundance = "lengthScaledTPM", ignoreAfterBar = TRUE)
+txi<- tximport(files, type="salmon", 
+               tx2gene = tx2gene, 
+               countsFromAbundance = "lengthScaledTPM", 
+               ignoreAfterBar = TRUE)
 dim(txi$abundance)
 dim(txi$counts)
 dim(txi$length)
@@ -77,7 +80,7 @@ cts <- rownames_to_column(cts)
 # Rename the column names to something more manageable and make sure to store the key 
 # somewhere in case you want to know which data set a specific number came from
 
-colnames(cts) <- c("GeneID", "KO.1", "KO.2", "KO.3", "WT.1", "WT.2", "WT.3")
+colnames(cts) <- c("GeneID", "WT.1", "WT.2", "WT.3", "KO.1", "KO.2", "KO.3")
 head(cts)
 
 # Gather the columns into a tidy format for easier manipulation. 
@@ -131,7 +134,7 @@ str(dds)
 #My favorite of these transformation is the vst, mostly because it is very fast, and provides transformed (nearly log-scale) data which is robust to many problems associated with log-transformed data (for more details, see the DESeq2 workflow or vignette ).
 #blind=FALSE refers to the fact that we will use the design in estimating the global scale of biological variability, but not directly in the transformation:
 vst <- vst(dds, blind=FALSE)
-plotPCA(vst, "Treatment")
+plotPCA(vst, intgroup = "Treatment")
 
 #We will chop off the version number of the gene IDs, so that we can better look up their annotation information later.
 #However, we have a few genes which would have duplicated gene IDs after chopping off the version number, so in order to proceed we have to also use make.unique to indicate that some genes are duplicated. (It might be worth looking into why we have multiple versions of genes with the same base ID coming from our annotation.)
@@ -163,12 +166,12 @@ summary(res_dds_over1)
 
 #add gene names (symbols) to deseq results file
 #modify your deseq results (res) table to take off numbers after decimal point to allow for matching to this database, needed to install org.Mm.eg.db previously for this to work
-geneIDs <- substr(rownames(res_dds_over1), 1, 18)
+#geneIDs <- substr(rownames(res_dds_over1), 1, 18)
 # running mapIDs: collect gene symbols for the ensembl names in your geneID list
-library(org.Mm.eg.db)
-gene_symbols <- mapIds(org.Mm.eg.db, keys = geneIDs, column = "SYMBOL", keytype = "ENSEMBL", multiVals = "first")
+#library(org.Mm.eg.db)
+#gene_symbols <- mapIds(org.Mm.eg.db, keys = geneIDs, column = "SYMBOL", keytype = "ENSEMBL", multiVals = "first")
 #add gene symbols as a new column to your res file
-res_dds_over1$GeneSymbol <- gene_symbols
+#res_dds_over1$GeneSymbol <- gene_symbols
 
 par("mar")
 par(mar=c(1,1,1,1))
@@ -180,7 +183,7 @@ with(subset(res_dds_over1, padj<.05 ), points(log2FoldChange, -log10(pvalue), pc
 #with(subset(res, padj<.05 & abs(log2FoldChange)>1), points(log2FoldChange, -log10(pvalue), pch=20, col="green"))
 res_dds_over1 <- as.data.frame(res_dds_over1)
 #res_dds_over1 <- res_dds_over1[ ,c(7, 1:6)]
-head(res_dds_over1)
+#head(res_dds_over1)
 #row.names(res_dds_over1)
 #a <- row.names(res_dds_over1)
 #namesTrim <- gsub("\\|.*", "", a)
@@ -228,23 +231,50 @@ head(res_cts_tidy)
 write.csv((res_cts_tidy),
           file="/Volumes/LaCie/SequencingData/H2BE/old_brains/DESeq/Sam_analysis/1.H2beKOvsWT_deseqWithGeneExpr.csv")
 
+## Generate a histogram of WT expression values to see if there is an elbow
+
+res_cts_tidy %>%
+  filter(condition == "WT_cts") %>%
+  ggplot(aes(count)) +
+    geom_histogram(binwidth = 0.05) +
+    scale_x_log10() +
+    xlab("WT expression count distribution") +
+    geom_vline(xintercept = 5, color = "red") 
+
 ## Get distributions of expression levels by condition
 res_cts_tidy %>%
   ggplot(aes(condition, count)) +
   geom_boxplot() +
-  scale_y_continuous(trans = "log10")
+  scale_y_continuous(trans = "log10") 
+  
+
+## Trying another method to also show t.test results as well
+## We want a two-sample t-test
+
+res_cts_tidy %>% identify_ou
+
+comparison <- list(c("WT_cts", "KO_cts"))
+p <- ggboxplot(res_cts_tidy, 
+            x = "condition", y = "count",
+            color = "condition", 
+            palette = "npg") +
+  stat_compare_means(method = "t.test", 
+                     label.x = 1.3) +
+  scale_y_log10()
+
+p
 
 ## Get the distribution of KO Log2FC vs WT
 
 res_cts_tidy %>%
   ggplot() +
-  geom_density(aes(x = log2FC), bw = 2.2)
+  geom_density(aes(x = log2FC, bw = 2.2))
 
 ## Get distribution of log2FCs, binned by quartiles 
 
 res_cts_tidy %>%
   filter(condition == "WT_cts",
-         count > 1) %>%
+         count > 0) %>%
   ggplot(aes(x = log2FC, y = count, group = quartile)) +
     geom_boxplot() +
   facet_wrap(. ~ as.factor(quartile)) +
@@ -252,7 +282,7 @@ res_cts_tidy %>%
   
 res_cts_tidy %>%
   filter(condition == "WT_cts",
-         count > 1) %>%
+         count > 0) %>%
   ggplot(aes(x = log2FC, y = count, group = quartile)) +
   geom_boxplot(varwidth = TRUE) +
   scale_y_log10()
@@ -261,7 +291,7 @@ res_cts_tidy %>%
 res_cts_tidy %>%
   group_by(quartile) %>%
   filter(condition == "WT_cts",
-         count > 1) %>%
+         count > 0) %>%
   ggplot(aes(x = as.factor(quartile), y = count)) +
   geom_boxplot() +
   scale_y_log10() +
@@ -272,7 +302,7 @@ res_cts_tidy %>%
 # Showing just data points with p.adjusted < 0.05
 res_cts_tidy %>%
   filter(condition == "WT_cts",
-         count > 5,
+         count > 0,
          p.adjusted < 0.05) %>%
   ggplot(aes(x = as.factor(quartile), y = count)) +
   geom_boxplot() +
@@ -285,7 +315,7 @@ res_cts_tidy %>%
 ## First we make a temporary data frame to hold all WT counts with a minimum expression over 5
 temp <- res_cts_tidy %>%
   filter(condition == "WT_cts",
-         count > 5) 
+         count > 0) 
 
 ## Then, we can begin a new filter on the original data to remove H2be, get counts over 5 and
 ## significant adjusted p values
@@ -295,7 +325,7 @@ temp <- res_cts_tidy %>%
 res_cts_tidy %>%
   filter(GeneSymbol != "Hist2h2be",
          condition == "WT_cts",
-         count > 5,
+         count > 0,
          p.adjusted < 0.05) %>%
   ggplot(aes(x = as.factor(quartile), y = count)) +
   geom_boxplot() +
@@ -311,14 +341,14 @@ res_cts_tidy %>%
 # (i.e. GeneSymbol = NA)
 temp2 <- res_cts_tidy %>%
           filter(condition == "WT_cts",
-          count > 5,
+          count > 0,
           !is.na(GeneSymbol)) 
 
 res_cts_tidy %>%
   filter(GeneSymbol != "Hist2h2be",
          !is.na(GeneSymbol),
          condition == "WT_cts",
-         count > 5,
+         count > 0,
          p.adjusted < 0.05) %>%
   ggplot(aes(x = as.factor(quartile), y = count)) +
   geom_boxplot() +
