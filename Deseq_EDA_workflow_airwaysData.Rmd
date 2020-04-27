@@ -7,51 +7,45 @@ output: html_document
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(magrittr)
 ```
+The following dataset summarizes an RNA-seq experiment wherein four types of airway smooth muscle cells were treated with dexamethasone, a synthetic glucocorticoid steroid with anti-inflammatory effects (Himes et al. 2014). This dataset jumps ahead of all the pre-processing steps that you need to do for an actual RNAseq dataset. So, after reading in the "airway" data, you have what the authors of DESeq call a _SummarizedExperiment_, which has the structure seen [here](https://www.google.com/url?sa=i&url=https%3A%2F%2Ff1000research.com%2Farticles%2F4-1070&psig=AOvVaw1-Gsjy_KLVsnoHqF4kFT6W&ust=1587823013336000&source=images&cd=vfe&ved=0CAIQjRxqFwoTCMC8guubgekCFQAAAAAdAAAAABAD). 
 
 ## R Markdown
-``` {r, echo = F}
+``` {r, echo = F, message = FALSE}
 library(airway)
 data("airway")
 se <- airway
+class(se)
+```
+In order to perform differential expression analysis on this dataset, it needs to be converted to a DeseqDataSet. This requires defining a formula for the comparison that Deseq2 makes in the analysis. "The simplest design formula for differential expression would be ~ condition, where condition is a column in colData(dds) that specifies which of two (or more groups) the samples belong to. For the airway experiment, we will specify ~ cell + dex meaning that we want to test for the effect of dexamethasone (dex) controlling for the effect of different cell line."
+In this case, the dex condition is a factor with levels "treated" and "untreated". However, in Deseq2 it's preferred that the control condition, "untreated", come first. So, we relevel the factor as follows.
+
+``` {r}
 se$dex <- relevel(se$dex, "untrt")
 ```
 
-We can quickly check the millions of fragments that uniquely aligned to the genes (the second argument of round tells
-how many decimal points to keep).
-
-``` {r}
-round( colSums(assay(se)) / 1e6, 1 )
-```
-
-Now we're ready to run Deseq on this data
+Now we're ready to run Deseq on this data:
+First, make a DESeqDataSet object. Then, you can explore some of the features of the dds object. For example, to see some of the identifying information about the samples included in dds, use colData(); to see the transcripts mapped to each gene/sample use assay().
 
 ``` {r}
 library(DESeq2)
 dds <- DESeqDataSet(se, design = ~ cell + dex)
-countdata <- assay(se)
-head(countdata, 3)
-coldata <- colData(se)
+(coldata <- colData(dds)) 
+countData <- assay(dds)
+head(countData, 3)
 ```
 
-
-To now construct the DESeqDataSet object from the matrix of counts and the sample information table, we use:
-
-``` {r}
-(dds <- DESeqDataSetFromMatrix(countData = countdata,
- colData = coldata,
- design = ~ cell + dex))
-```
 
 Now we begin some exploratory anlaysis and visualization of the data
-Dimensions:
+Look at the dimensions and filter out rows in which only 0 or 1 fragments were mapped. This shrinks the dataset, making it easier to work with, and cuts down on noise.
 ``` {r}
 dim(dds)
 dds <- dds[ rowSums(counts(dds)) > 1, ]
-nrow(dds)
+dim(dds)
 ```
 
-An regularized logarithm transformation or Variance stabilizing transformation lets you make comparisons between genes that have very different expression values. From Love et al. 2015: 
+One of the primary methods for exploring the data is PCA, but in order to use this method, we need to transform the data, so that the few genes with extremely high expression levels don't dominate the effect and skew the visualization of the data. A regularized logarithm transformation (rlog) or Variance stabilizing transformation (vst) lets you make comparisons between genes that have very different expression values. From Love et al. 2015: 
 "Using an empirical Bayesian prior on inter-sample differences in the form of a ridge penalty, the rlog-transformed data then become approximately homoskedastic, and can be used directly for computing distances between samples and making PCA plots"
 
 Here, "We specify blind=FALSE, which means that differences between cell lines and treatment should not add to the variance-mean profile of the experiment"
@@ -61,28 +55,23 @@ rld <- rlog(dds, blind=FALSE)
 head(assay(rld), 3)
 
 (vst <- vst(dds, blind = FALSE))
-head(assay(vst), 5)
+head(assay(vst), 3)
 ```
 
-Explore the relationship between samples by graphing
-``` {r}
-par( mfrow = c( 1, 2 ) )
-plot(assay(rld)[,1:2],
- pch=16, cex=0.3)
+Explore the relationship between two samples by graphing
 
-plot(assay(vst)[, 1:4],
-     pch = 16, cex = 0.3)
-```
+** Try adding in the geom_hex density visualization here **
 
-Or use PCA to view all samples at once. There's a built-in PCA function in Deseq2 but you could also build a PCA plot in ggplot2 if you wanted. This could be helpful for looking at how the samples in your dataset relate to one another. 
+There's a built-in PCA function in Deseq2 but you could also build a PCA plot in ggplot2 if you wanted. To do this, use the returnData argument in plotPCA() and assign the call to an object. This could be helpful for looking at how the samples in your dataset relate to one another. 
 ``` {r}
-(PCAdata <- plotPCA(vst, "Sample", returnData = TRUE))
+plotPCA(rld, intgroup = c("dex", "cell"))
 (rlog_pca <- plotPCA(rld, intgroup = c("dex", "cell"), returnData = TRUE))
+rlog_pca
 library(ggplot2)
 ## Add a new column to the matrix 
 percentVar <- round(100 * attr(rlog_pca, "percentVar"))
-rlog_pca %>%
-  ggplot(aes(x = PC1, y = PC2, color = dex, shape = cell)) +
+
+ggplot(rlog_pca, aes(x = PC1, y = PC2, color = dex, shape = cell)) +
   geom_point(size = 4) +
   xlab(paste0("PC1: ",percentVar[1],"% variance")) +
   ylab(paste0("PC2: ",percentVar[2],"% variance"))
@@ -98,13 +87,13 @@ Another helpful piece of information is the overall similarity between samples. 
 (vstSampleDists <- dist( t(assay(vst))))
 ```
 
-You can then visualize those distances with a heatmap
+You can then visualize those distances with a heatmap. Here I think the take away is similar to the PCA: the treated samples appear closer to each other and the same is true for the untreated samples. 
 ``` {r}
 library("pheatmap")
 library("RColorBrewer")
 
-sampleDistMatrix <- as.matrix( vstSampleDists )
-rownames(sampleDistMatrix) <- paste( vst$dex, vst$cell, sep="-" )
+sampleDistMatrix <- as.matrix( rlogSampleDists )
+rownames(sampleDistMatrix) <- paste( rld$dex, rld$cell, sep="-" )
 colnames(sampleDistMatrix) <- NULL
 colors <- colorRampPalette( rev(brewer.pal(9, "Blues")) )(255)
 pheatmap(sampleDistMatrix,
@@ -128,6 +117,76 @@ pheatmap(samplePoisDistMatrix,
 We can also run the Differential Expression Analysis offered by Deseq2. Calling mcols on this resulting object gives you some information about each of the columns produced. 
 ``` {r}
 dds <- DESeq(dds)
-(res <- results(dds, ))
-mcols(res, use.names = TRUE)
+(res <- results(dds))
 ```
+
+Since we've been working with tidy objects for ggplot2, I found a great package for converting Deseq objects into forms that can be used with tidyverse functions.
+
+``` {r}
+library(biobroom)
+res_tidy <- tidy.DESeqResults(res)
+head(res_tidy)
+```
+Now, we should be able to practice some ggplot visualizations on the RNAseq data/DEA.
+Volcano plot - apparently most of the genes in this data set are significantly DE:
+Histogram of the pvalues:
+
+``` {r}
+res_tidy %>% 
+  filter(!is.na(p.adjusted)) %>%
+  ggplot(aes(x = estimate, y = -log10(p.adjusted), color = p.adjusted < 0.05)) +
+                      geom_point(alpha = 0.3) 
+
+res_tidy %>%
+  filter(baseMean > 1,
+         !is.na(p.adjusted)) %>%
+  ggplot(aes(p.adjusted)) +
+  geom_histogram()
+
+```
+
+You could also filter for the genes that were most significantly changed between conditions (based on a threshold that seems meaningful in the context of your experiment) and then visualize how these compare between samples using a heatmap.  Just as with the PCA plots, this should be done with the transformed data. I think this is probably more informative when you have more than two conditions, and this sort of template should work in that context as well. 
+``` {r}
+resSig_top100 <- res_tidy %>% arrange(p.adjusted) %>% head(100)
+counts <- assay(rld)
+cts_sigTop100 <- counts[rownames(counts) %in% resSig_top100$gene, ]
+cts_mat <- t(scale(t(cts_sigTop100)))
+
+pheatmap(cts_mat,
+         show_rownames = FALSE,
+         show_colnames = FALSE)
+```
+
+The paper also include this vignette to look at the genes with the greatest variance across samples. Again, starting from the transformed counts matrix, they suggesting looking at the "amount by which each gene deviates in a specific sample from the gene’s average across all samples."
+
+``` {r}
+topVarGenes <- head(order(rowVars(assay(rld)),decreasing=TRUE),20)
+mat <- assay(rld)[ topVarGenes, ]
+mat <- mat - rowMeans(mat)
+df <- as.data.frame(colData(rld)[,c("cell","dex")])
+pheatmap(mat, annotation_col=df)
+
+```
+
+You could also filter for a gene of interest and plot the relative expression levels in your conditions. As an example, here the gene with the lowest pvalue is selected. the plotCounts fuction in Deseq lets you create a small data frame to do this. 
+
+``` {r}
+topGene <- rownames(res)[which.min(res$padj)]
+geneCounts <- plotCounts(dds, gene = topGene, intgroup = c("dex","cell"),
+                         returnData = TRUE)
+ggplot(geneCounts, aes(x = dex, 
+                       y = count, 
+                       color = cell, 
+                       group = cell)) +
+  scale_y_log10() + 
+  geom_point(size = 3) + 
+  geom_line()
+```
+
+
+And there's obviously a ton of other options for visualizing RNAseq data. I think it's defintely the type of thing we should all continue to share when we find a method that works well! I hope this was informative!
+
+The majority of this workflow is from: 
+Love MI, Anders S, Kim V and Huber W. RNA-Seq workflow: gene-level exploratory analysis and differential expression [version 1; referees: 2 approved] F1000Research 2015, 4:1070 (doi: [10.12688/f1000research.7035.1](https://f1000research.com/articles/4-1070/v1))
+
+
